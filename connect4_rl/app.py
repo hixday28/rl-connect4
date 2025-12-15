@@ -75,7 +75,7 @@ def draw_board(board, target_container=None):
                 cell_class = "empty"
             html_cells.append(f'<div class="cell {cell_class}"></div>')
         
-        html_rows.append(f'<div class="board-row">{" ".join(html_cells)}</div>')
+        html_rows.append(f'<div class="board-row">{"".join(html_cells)}</div>')
 
     full_board_html = "".join(html_rows)
 
@@ -101,18 +101,25 @@ with tab1:
     episodes = st.sidebar.number_input("Количество игр (эпизодов)", min_value=100, max_value=1000000, value=10000, step=100)
     alpha = st.sidebar.slider("Скорость обучения (Alpha)", 0.01, 1.0, 0.1, 0.01)
     gamma = st.sidebar.slider("Дисконт-фактор (Gamma)", 0.8, 0.99, 0.99, 0.01)
-    epsilon = st.sidebar.slider("Коэффициент исследования (Epsilon)", 0.05, 0.5, 0.1, 0.05)
+    epsilon = st.sidebar.slider("Начальный Epsilon", 0.1, 1.0, 0.9, 0.05)
+    min_epsilon = st.sidebar.number_input("Минимальный Epsilon", min_value=0.0, max_value=0.2, value=0.01, step=0.01, format="%.2f")
+    epsilon_decay = st.sidebar.number_input("Затухание Epsilon", min_value=0.9, max_value=1.0, value=0.9995, step=0.0001, format="%.4f")
     
     demo_mode = st.checkbox("Режим демонстрации (с визуализацией игры)")
 
     if st.button("Начать обучение"):
-        agent1 = QLearningAgent(alpha=alpha, gamma=gamma, epsilon=epsilon)
-        agent2 = QLearningAgent(alpha=alpha, gamma=gamma, epsilon=epsilon)
+        agent1 = QLearningAgent(
+            alpha=alpha, gamma=gamma, epsilon=epsilon, 
+            min_epsilon=min_epsilon, epsilon_decay=epsilon_decay
+        )
+        agent2 = QLearningAgent(
+            alpha=alpha, gamma=gamma, epsilon=epsilon,
+            min_epsilon=min_epsilon, epsilon_decay=epsilon_decay
+        )
         env = ConnectFourEnv()
         
-        status_text = st.empty() # Плейсхолдер для статуса обучения
+        status_text = st.empty()
         
-        # Настройка в зависимости от режима
         if demo_mode:
             if episodes > 1000:
                 st.warning("В режиме демонстрации количество эпизодов ограничено до 1000.")
@@ -134,10 +141,9 @@ with tab1:
             done = False
             
             while not done:
-                # Отрисовка доски в демо-режиме
                 if demo_mode:
                     draw_board(env.board, target_container=board_placeholder)
-                    time.sleep(0.05) # Небольшая задержка для наглядности
+                    time.sleep(0.05)
 
                 # Ход Агента 1
                 action1 = agent1.choose_action(env)
@@ -147,15 +153,14 @@ with tab1:
                 next_state, reward1, done, info = env.step(action1)
                 
                 if done:
-                    if reward1 == 1: # Агент 1 выиграл
+                    if reward1 == 10: # Агент 1 выиграл
                         wins_agent1 += 1
-                        reward2 = -1 # Агент 2 проиграл
+                        reward2 = -10 # Агент 2 проиграл
                     elif 'error' in info: # Неверный ход
-                        reward2 = 1 # Вознаграждаем второго агента за ошибку первого
+                        reward2 = 10 # Вознаграждаем второго агента за ошибку первого
                     else: # Ничья
                         reward2 = 0
                 else:
-                    # Отрисовка доски в демо-режиме после хода агента 1
                     if demo_mode:
                         draw_board(env.board, target_container=board_placeholder)
                         time.sleep(0.05)
@@ -167,10 +172,9 @@ with tab1:
                     old_state2 = env.get_state()
                     next_state, reward2, done, info = env.step(action2)
 
-                    if done and reward2 == 1: # Агент 2 выиграл
-                        reward1 = -1 # Агент 1 проиграл
-                    else: # Ничья или обычный ход
-                        reward1 = 0
+                    if done and reward2 == 10: # Агент 2 выиграл
+                        reward1 = -10 # Агент 1 проиграл
+                    # Ничья или ошибка агента 2 обрабатываются reward2, пришедшим из env
                     
                     # Обучаем агента 2
                     agent2.learn(old_state2, action2, reward2, next_state, done)
@@ -189,7 +193,7 @@ with tab1:
                 chart_placeholder.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
         st.success("Обучение завершено!")
-        status_text.empty() # Очищаем сообщение о статусе после завершения обучения
+        status_text.empty()
         
         # Сохранение результатов
         final_win_rate = (wins_agent1 / episodes) * 100
@@ -208,14 +212,12 @@ with tab2:
         st.warning(f"Файл с обученным агентом `{Q_TABLE_FILE}` не найден. Сначала обучите агента на вкладке 'Обучение'.")
     else:
         # Загружаем агента, если он еще не в сессии
-        if not st.session_state.agent.q_table:
+        if 'q_table' not in st.session_state.agent.q_table or not st.session_state.agent.q_table:
             st.session_state.agent.load(Q_TABLE_FILE)
             st.session_state.agent.epsilon = 0 # В режиме игры агент не исследует
             st.success(f"Агент успешно загружен из `{Q_TABLE_FILE}`.")
 
-        # Отображение доски
-        draw_board(st.session_state.env.board)
-
+        # Отображение статуса победы/проигрыша вверху
         if st.session_state.game_over:
             if st.session_state.winner == 1:
                 st.success("Поздравляем, вы победили! 🎉")
@@ -223,37 +225,54 @@ with tab2:
                 st.error("Агент победил. Попробуйте еще раз! 🤖")
             else:
                 st.info("Ничья! 🤝")
+
+        # --- Рендеринг игрового поля и кнопок по колонкам ---
+        valid_moves = st.session_state.env.get_valid_moves()
+        cols = st.columns(st.session_state.env.cols)
+        
+        human_action = None
+
+        for i in range(st.session_state.env.cols):
+            with cols[i]:
+                # 1. Отрисовка ячеек колонки
+                for r in range(st.session_state.env.rows):
+                    player = st.session_state.env.board[r, i]
+                    icon = "⚪️"
+                    if player == 1: icon = "🔴"
+                    elif player == 2: icon = "🔵"
+                    st.markdown(f"<p style='text-align: center; font-size: 28px; height: 40px;'>{icon}</p>", unsafe_allow_html=True)
+                
+                st.write("") # Разделитель
+
+                # 2. Отрисовка кнопки для колонки
+                is_disabled = (i not in valid_moves) or st.session_state.game_over or (st.session_state.env.current_player != 1)
+                if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=True):
+                    human_action = i
+
+        # --- Игровая логика (выполняется после отрисовки) ---
+        if human_action is not None:
+            # Ход человека
+            _, _, human_done, _ = st.session_state.env.step(human_action)
             
-            if st.button("Новая игра"):
-                reset_game()
+            if human_done:
+                st.session_state.game_over = True
+                st.session_state.winner = 1 if st.session_state.env.check_win(1) else 0
+                st.rerun()
+            else:
+                # Ход агента
+                action = st.session_state.agent.choose_action(st.session_state.env)
+                if action is not None:
+                    _, _, agent_done, _ = st.session_state.env.step(action)
+                    if agent_done:
+                        st.session_state.game_over = True
+                        st.session_state.winner = 2 if st.session_state.env.check_win(2) else 0
                 st.rerun()
 
-        else:
-            # Ход человека (Игрок 1)
-            if st.session_state.env.current_player == 1:
-                cols = st.columns(7)
-                valid_moves = st.session_state.env.get_valid_moves()
-
-                for i in range(7):
-                    with cols[i]:
-                        if st.button(f"Ход {i+1}", disabled=(i not in valid_moves)):
-                            # Ход человека
-                            _, reward, done, _ = st.session_state.env.step(i)
-                            
-                            if done:
-                                st.session_state.game_over = True
-                                st.session_state.winner = 1 if reward == 1 else 0
-                                st.rerun()
-
-                            # Ход агента (Игрок 2)
-                            if not st.session_state.game_over:
-                                action = st.session_state.agent.choose_action(st.session_state.env)
-                                if action is not None:
-                                    _, reward, done, _ = st.session_state.env.step(action)
-                                    if done:
-                                        st.session_state.game_over = True
-                                        st.session_state.winner = 2 if reward == 1 else 0
-                                st.rerun()
+        # Кнопка "Новая игра" появляется только после завершения
+        if st.session_state.game_over:
+            if st.button("Новая игра", use_container_width=True):
+                reset_game()
+                st.rerun()
 
 # --- ВКЛАДКА "СТАТИСТИКА" ---
 with tab3:

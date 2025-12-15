@@ -29,22 +29,46 @@ class ConnectFourEnv:
         """
         return [c for c in range(self.cols) if self.board[0][c] == 0]
 
+    def _count_sequences(self, player, length):
+        """
+        Подсчитывает количество последовательностей (угроз) определенной длины для игрока.
+        Ищет `length` фишек игрока в окне из 4-х, где остальные ячейки пусты.
+        """
+        count = 0
+        # Проверка по всем направлениям
+        for r in range(self.rows):
+            for c in range(self.cols):
+                # Горизонталь
+                if c <= self.cols - 4:
+                    window = self.board[r, c:c+4]
+                    if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
+                        count += 1
+                # Вертикаль
+                if r <= self.rows - 4:
+                    window = self.board[r:r+4, c]
+                    if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
+                        count += 1
+                # Положительная диагональ (/)
+                if r >= 3 and c <= self.cols - 4:
+                    window = np.array([self.board[r-i, c+i] for i in range(4)])
+                    if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
+                        count += 1
+                # Отрицательная диагональ (\)
+                if r <= self.rows - 4 and c <= self.cols - 4:
+                    window = np.array([self.board[r+i, c+i] for i in range(4)])
+                    if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
+                        count += 1
+        return count
+
     def step(self, col):
         """
         Выполняет ход в указанной колонке.
-        Аргументы:
-            col (int): Номер колонки (0-6).
-        Возвращает:
-            tuple: (state, reward, done, info)
-                - state (np.array): Новое состояние доски.
-                - reward (float): Награда за ход.
-                - done (bool): True, если игра завершена.
-                - info (dict): Дополнительная информация.
         """
+        mover = self.current_player
+        
         # Проверка, является ли ход допустимым
         if col not in self.get_valid_moves():
-            # Недопустимый ход, наказываем агента
-            return self.board, -1, True, {'error': 'Invalid move'}
+            return self.board, -10.0, True, {'error': 'Invalid move'}
 
         # Находим первую свободную строку в колонке
         row = -1
@@ -53,32 +77,31 @@ class ConnectFourEnv:
                 row = r
                 break
         
-        self.board[row][col] = self.current_player
+        self.board[row][col] = mover
 
         # Проверка на победу
-        if self.check_win(self.current_player):
-            reward = 1.0  # Победа
+        if self.check_win(mover):
+            reward = 10.0
             done = True
         # Проверка на ничью
         elif len(self.get_valid_moves()) == 0:
-            reward = 0.0  # Ничья
+            reward = 0.0
             done = True
         else:
-            reward = 0.0  # Обычный ход
+            # Промежуточная награда (Reward Shaping)
+            threes = self._count_sequences(mover, 3)
+            twos = self._count_sequences(mover, 2)
+            reward = 0.1 * threes + 0.05 * twos
             done = False
 
         # Смена игрока
-        self.current_player = 3 - self.current_player  # 1 -> 2, 2 -> 1
+        self.current_player = 3 - mover
         
         return self.board, reward, done, {}
 
     def check_win(self, player):
         """
         Проверяет, выиграл ли указанный игрок.
-        Аргументы:
-            player (int): Игрок (1 или 2).
-        Возвращает:
-            bool: True, если игрок выиграл.
         """
         # Горизонтальная проверка
         for r in range(self.rows):
