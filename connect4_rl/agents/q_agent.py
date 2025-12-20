@@ -1,45 +1,35 @@
-# agents/q_agent.py
-
 import numpy as np
 import random
 import pickle
 
 class QLearningAgent:
-    """
-    Класс, реализующий агента, обучающегося с подкреплением (Q-Learning).
-    Агент использует Q-таблицу для принятия решений в среде ConnectFour.
-    """
+    
+    #Класс, который реализует агента, который обучается с подкреплением (Q-Learning).
+    #Агент использует Q-таблицу для принятия решений в среде ConnectFour.
+    
     def __init__(self, alpha=0.1, gamma=0.99, epsilon=0.1, min_epsilon=0.01, epsilon_decay=0.9995):
-        """
-        Инициализация агента.
-        Аргументы:
-            alpha (float): Скорость обучения (learning rate).
-            gamma (float): Коэффициент дисконтирования.
-            epsilon (float): Начальный коэффициент исследования (exploration rate).
-            min_epsilon (float): Минимальный коэффициент исследования.
-            epsilon_decay (float): Коэффициент затухания для эпсилон.
-        """
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.min_epsilon = min_epsilon
-        self.epsilon_decay = epsilon_decay
-        # Q-таблица хранится в словаре. Ключ - состояние доски, значение - Q-значения для действий.
-        self.q_table = {}
+        
+        
+        self.alpha = alpha # - Скорость обучения (learning rate)
+        self.gamma = gamma # - Коэффициент дисконтирования
+        self.epsilon = epsilon # - Начальный коэффициент исследования (exploration rate)
+        self.min_epsilon = min_epsilon # - Минимальный коэффициент исследования
+        self.epsilon_decay = epsilon_decay # - Коэффициент затухания для эпсилон
+        
+        self.q_table = {} # Q-таблица хранится в словаре. Ключ - состояние доски, значение - Q-значения для действий
 
     def get_q_values(self, state_str):
-        """
-        Получает Q-значения для данного состояния. Если состояния нет в таблице,
-        инициализирует его нулевыми значениями.
-        """
+        
+        #Получает Q-значения для данного состояния. Если состояния нет в таблице, инициализирует его нулевыми значениями
+        
         if state_str not in self.q_table:
             self.q_table[state_str] = np.zeros(7)
         return self.q_table[state_str]
 
     def choose_action(self, env):
-        """
-        Выбирает действие (колонку) с использованием эпсилон-жадной стратегии.
-        """
+        
+        #Выбирает действие (колонку) с использованием эпсилон-жадной стратегии
+        
         valid_moves = env.get_valid_moves()
         if not valid_moves:
             return None # Нет доступных ходов
@@ -65,9 +55,9 @@ class QLearningAgent:
         return random.choice(best_actions)
 
     def learn(self, state, action, reward, next_state, done):
-        """
-        Обновляет Q-таблицу на основе полученного опыта.
-        """
+        
+        # Обновляет Q-таблицу на основе полученного опыта
+        
         state_str = str(state.tobytes())
         next_state_str = str(next_state.tobytes())
         
@@ -88,16 +78,17 @@ class QLearningAgent:
         self.decay_epsilon()
 
     def decay_epsilon(self):
-        """Уменьшает эпсилон для снижения исследования со временем."""
+        #Уменьшает эпсилон для снижения исследования со временем
+
         self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
 
     def save(self, filename="q_agent.pkl"):
-        """Сохраняет Q-таблицу в файл с помощью pickle."""
+        # Сохраняет Q-таблицу в файл с помощью pickle
         with open(filename, 'wb') as f:
             pickle.dump(self.q_table, f)
 
     def load(self, filename="q_agent.pkl"):
-        """Загружает Q-таблицу из файла."""
+        # Загружает Q-таблицу из файла
         try:
             with open(filename, 'rb') as f:
                 self.q_table = pickle.load(f)

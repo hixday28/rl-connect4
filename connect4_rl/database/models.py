@@ -1,5 +1,3 @@
-# database/models.py
-
 import pandas as pd
 from sqlalchemy import create_engine, Column, Integer, Float, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -8,6 +6,7 @@ import os
 
 # Путь к файлу базы данных
 DB_FILE = "training_stats.db"
+
 # URL для подключения. 'sqlite:///' означает, что файл будет в корне проекта.
 DATABASE_URL = f"sqlite:///{DB_FILE}"
 
@@ -17,10 +16,10 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 # Сессия для взаимодействия с БД
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Базовый класс для всех моделей
+#Базовый класс для всех моделей
 Base = declarative_base()
 
-# --- Модель данных ---
+#Модель данных
 class TrainingSession(Base):
     """
     Модель SQLAlchemy для хранения результатов сессии обучения.
@@ -32,22 +31,17 @@ class TrainingSession(Base):
     episodes_run = Column(Integer, nullable=False)
     win_rate_agent_1 = Column(Float, nullable=False)
 
-# --- Функции для работы с БД ---
+#Функции для работы с БД
 
 def init_db():
-    """
-    Инициализирует базу данных: создает все таблицы на основе моделей.
-    """
-    # Создаем все таблицы, которые наследуются от Base
+    
+    #Создаем все таблицы, которые наследуются от Base
     Base.metadata.create_all(bind=engine)
 
 def save_training_result(episodes, win_rate):
-    """
-    Сохраняет результат одной сессии обучения в базу данных.
-    Аргументы:
-        episodes (int): Количество сыгранных эпизодов (игр).
-        win_rate (float): Процент побед первого агента.
-    """
+    
+    #Сохраняет результат одной сессии обучения в базу данных.
+    
     db = SessionLocal()
     try:
         session_result = TrainingSession(
@@ -60,12 +54,9 @@ def save_training_result(episodes, win_rate):
         db.close()
 
 def get_all_results():
-    """
-    Извлекает все результаты обучения из базы данных.
-    Возвращает:
-        pd.DataFrame: DataFrame с историей всех сессий обучения.
-                      Возвращает пустой DataFrame, если данных нет.
-    """
+    
+    #Извлекает все результаты обучения из базы данных
+
     db = SessionLocal()
     try:
         # Выполняем запрос и сразу читаем результат в pandas DataFrame
@@ -75,7 +66,7 @@ def get_all_results():
     finally:
         db.close()
 
-# Проверяем, существует ли файл БД. Если нет, создаем и инициализируем.
+#Проверяем, существует ли файл БД. Если нет то создаем и инициализируем
 if not os.path.exists(DB_FILE):
     print(f"База данных {DB_FILE} не найдена. Создание новой...")
     init_db()

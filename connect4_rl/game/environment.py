@@ -3,10 +3,9 @@
 import numpy as np
 
 class ConnectFourEnv:
-    """
-    Класс, представляющий среду для игры "4 в ряд" (Connect Four).
-    Среда предоставляет стандартный интерфейс для RL-агентов.
-    """
+    
+    #Класс, представляющий среду для игры
+    
     def __init__(self, rows=6, cols=7):
         self.rows = rows
         self.cols = cols
@@ -14,26 +13,22 @@ class ConnectFourEnv:
         self.current_player = 1  # Начинает игрок 1
 
     def reset(self):
-        """
-        Сбрасывает доску к начальному состоянию.
-        Возвращает:
-            np.array: Начальное состояние доски.
-        """
+        
+        #Сбрасывает доску к начальному состоянию.
+        
         self.board = np.zeros((self.rows, self.cols), dtype=int)
         self.current_player = 1
         return self.board
 
     def get_valid_moves(self):
-        """
-        Возвращает список колонок, в которые можно сделать ход.
-        """
+        # Возвращает список колонок, в которые можно сделать ход.
+        
         return [c for c in range(self.cols) if self.board[0][c] == 0]
 
     def _count_sequences(self, player, length):
-        """
-        Подсчитывает количество последовательностей (угроз) определенной длины для игрока.
-        Ищет `length` фишек игрока в окне из 4-х, где остальные ячейки пусты.
-        """
+        
+        #Подсчитывает количество последовательностей (угроз) определенной длины для игрока
+        
         count = 0
         # Проверка по всем направлениям
         for r in range(self.rows):
@@ -43,12 +38,12 @@ class ConnectFourEnv:
                     window = self.board[r, c:c+4]
                     if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
                         count += 1
-                # Вертикаль
+                #вертикаль
                 if r <= self.rows - 4:
                     window = self.board[r:r+4, c]
                     if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
                         count += 1
-                # Положительная диагональ (/)
+                # положительная диагональ (/)
                 if r >= 3 and c <= self.cols - 4:
                     window = np.array([self.board[r-i, c+i] for i in range(4)])
                     if np.count_nonzero(window == player) == length and np.count_nonzero(window == 0) == 4 - length:
@@ -61,16 +56,16 @@ class ConnectFourEnv:
         return count
 
     def step(self, col):
-        """
-        Выполняет ход в указанной колонке.
-        """
+        
+        # Выполняет ход в указанной колонке.
+
         mover = self.current_player
         
-        # Проверка, является ли ход допустимым
+        #проверка является ли ход допустимым
         if col not in self.get_valid_moves():
             return self.board, -10.0, True, {'error': 'Invalid move'}
 
-        # Находим первую свободную строку в колонке
+        #находим первую свободную строку в колонке
         row = -1
         for r in range(self.rows - 1, -1, -1):
             if self.board[r][col] == 0:
@@ -100,9 +95,9 @@ class ConnectFourEnv:
         return self.board, reward, done, {}
 
     def check_win(self, player):
-        """
-        Проверяет, выиграл ли указанный игрок.
-        """
+        
+        #Проверяет, выиграл ли указанный игрок.
+        
         # Горизонтальная проверка
         for r in range(self.rows):
             for c in range(self.cols - 3):
@@ -130,5 +125,5 @@ class ConnectFourEnv:
         return False
     
     def get_state(self):
-        """Возвращает текущее состояние доски."""
+        # Возвращает текущее состояние доски
         return self.board
