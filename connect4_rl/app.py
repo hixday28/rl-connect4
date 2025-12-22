@@ -81,7 +81,7 @@ def draw_board(board, target_container=None):
     html_rows = []
     for r in range(board.shape[0]):
         html_cells = []
-        for c in range(board.shape[1]):
+        for c in range(board.shape[1]): # ИСПРАВЛЕНО: Используем board.shape[1]
             player = board[r, c]
             if player == 1: cell_class = "player1"
             elif player == 2: cell_class = "player2"
@@ -218,13 +218,24 @@ with tab2:
 
     st.markdown("""
         <style>
-            .game-controls [data-testid="stHorizontalBlock"] {
+            /* Стили для кнопок выбора столбца */
+            .game-controls-container {
+                display: flex;
+                justify-content: center; /* Центрируем контейнер с колонками */
+                margin-top: 10px; /* Отступ сверху от доски */
+            }
+            .game-controls [data-testid="stColumn"] {
+                flex: 0 0 56px !important; /* Фиксированная ширина колонки: 50px (кнопка) + 3px*2 (margin) */
+                padding: 0px !important; /* Убираем внутренний отступ колонок */
                 display: flex;
                 justify-content: center;
-                gap: 6px; /* (50px cell + 3px margin * 2) - 50px button = 6px */
+                align-items: center;
             }
-             .game-controls .stButton>button {
-                width: 50px;
+            .game-controls .stButton>button {
+                width: 50px; /* Ширина самой кнопки */
+                height: 35px; /* Высота кнопки */
+                margin: 0px; /* Убираем маргин с самой кнопки, так как его задает колонка */
+                padding: 0px; /* Убираем внутренний отступ кнопки */
             }
         </style>
     """, unsafe_allow_html=True)
@@ -244,17 +255,20 @@ with tab2:
         draw_board(st.session_state.env.board)
         
         human_action = None
-        with st.container():
-            st.markdown('<div class="game-controls">', unsafe_allow_html=True)
-            action_cols = st.columns(st.session_state.env.cols)
-            valid_moves = st.session_state.env.get_valid_moves()
-            
-            for i in range(st.session_state.env.cols):
-                with action_cols[i]:
-                    is_disabled = (i not in valid_moves) or st.session_state.game_over
-                    if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=False):
-                        human_action = i
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Контейнер для центрирования кнопок
+        st.markdown('<div class="game-controls-container">', unsafe_allow_html=True)
+        st.markdown('<div class="game-controls">', unsafe_allow_html=True) 
+        action_cols = st.columns(st.session_state.env.cols)
+        valid_moves = st.session_state.env.get_valid_moves()
+        
+        for i in range(st.session_state.env.cols):
+            with action_cols[i]:
+                is_disabled = (i not in valid_moves) or st.session_state.game_over
+                if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=True): # Используем use_container_width=True
+                    human_action = i
+        st.markdown('</div>', unsafe_allow_html=True) 
+        st.markdown('</div>', unsafe_allow_html=True) 
+
 
         if human_action is not None:
             st.session_state.move_history.append((1, human_action))
