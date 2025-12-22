@@ -5,18 +5,29 @@ import pandas as pd
 import time
 import os
 import plotly.express as px
+from datetime import datetime
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, func
 
 # Импортируем наши собственные модули
 from game.environment import ConnectFourEnv
 from agents.q_agent import QLearningAgent
-from database.models import init_db, save_training_result, get_all_results
+from database.models import (
+    Base,
+    Agent,
+    TrainingSession,
+    WinRateLog,
+    DB_FILE,
+    engine,
+)
 
 # Константа для файла с Q-таблицей
 Q_TABLE_FILE = "q_agent.pkl"
 
-# Начальная настройка
+# Сессия для взаимодействия с БД
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Используем session_state, чтобы сохранить состояние игры между действиями пользователя
+# Начальная настройка
 if 'env' not in st.session_state:
     st.session_state.env = ConnectFourEnv()
 if 'agent' not in st.session_state:
@@ -25,33 +36,48 @@ if 'game_over' not in st.session_state:
     st.session_state.game_over = False
 if 'winner' not in st.session_state:
     st.session_state.winner = None
+if 'move_history' not in st.session_state:
+    st.session_state.move_history = []
+if 'current_agent_id' not in st.session_state:
+    st.session_state.current_agent_id = None
 
-# Создаем базу данных при первом запуске
-init_db()
+# Создаем базу данных при первом запуске, если ее нет
+if not os.path.exists(DB_FILE):
+    Base.metadata.create_all(bind=engine)
 
+# Вспомогательные функции
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-#Вспомогательные функции:
-
-# Функция для отрисовки доски
 def draw_board(board, target_container=None):
     if target_container is None:
         target_container = st.container()
-
-    # Сначала чистим контейнер
     target_container.empty()
-
-    # Стили для ячеек доски
+    # CSS стили для доски
     styles = """
     <style>
-    .board-row { display: flex; flex-direction: row; justify-content: center; }
-    .cell { width: 50px; height: 50px; border-radius: 50%; display: inline-block; margin: 3px; border: 2px solid #ccc; }
+    .board-row { 
+        display: flex; 
+        flex-direction: row; 
+        justify-content: center; 
+    }
+    .cell { 
+        width: 50px; 
+        height: 50px; 
+        border-radius: 50%; 
+        display: inline-block; 
+        margin: 3px; 
+        border: 2px solid #ccc; 
+    }
     .player1 { background-color: #FF4B4B; }
     .player2 { background-color: #4B7BFF; }
     .empty { background-color: #FFFFFF; }
     </style>
     """
-
-    # Генерируем HTML для доски
     html_rows = []
     for r in range(board.shape[0]):
         html_cells = []
@@ -61,209 +87,251 @@ def draw_board(board, target_container=None):
             elif player == 2: cell_class = "player2"
             else: cell_class = "empty"
             html_cells.append(f'<div class="cell {cell_class}"></div>')
-        
         html_rows.append(f'<div class="board-row">{"".join(html_cells)}</div>')
+    
+    board_html = "".join(html_rows)
+    target_container.markdown(styles + board_html, unsafe_allow_html=True)
 
-    full_board_html = "".join(html_rows)
 
-    target_container.markdown(styles + full_board_html, unsafe_allow_html=True)
-
-# Функция для сброса игры
 def reset_game():
     st.session_state.env.reset()
     st.session_state.game_over = False
     st.session_state.winner = None
+    st.session_state.move_history = []
+    # Очищаем query params, если они использовались
+    if hasattr(st, 'query_params') and st.query_params:
+        st.query_params.clear()
 
-#UI приложения:
 
+# UI приложения
 st.title("Интеллектуальная система автоматизации подготовки ботов для стратегической игры «4 в ряд»")
 
-# Создаем вкладки
 tab1, tab2, tab3 = st.tabs(["Обучение", "Игра", "Статистика"])
 
-#ВКЛАДКА "ОБУЧЕНИЕ"
+# ВКЛАДКА "ОБУЧЕНИЕ"
 with tab1:
     st.header("Обучение агентов")
-
-    # Параметры для обучения в боковой панели
     st.sidebar.title("Параметры обучения")
     episodes = st.sidebar.number_input("Количество игр (эпизодов)", min_value=100, max_value=1000000, value=10000, step=100)
     alpha = st.sidebar.slider("Скорость обучения (Alpha)", 0.01, 1.0, 0.1, 0.01)
     gamma = st.sidebar.slider("Дисконт-фактор (Gamma)", 0.8, 0.99, 0.99, 0.01)
     epsilon = st.sidebar.slider("Начальный Epsilon", 0.1, 1.0, 0.9, 0.05)
-    min_epsilon = st.sidebar.number_input("Минимальный Epsilon", min_value=0.0, max_value=0.2, value=0.01, step=0.01, format="%.2f")
     epsilon_decay = st.sidebar.number_input("Затухание Epsilon", min_value=0.9, max_value=1.0, value=0.9995, step=0.0001, format="%.4f")
     
     demo_mode = st.checkbox("Режим демонстрации (с визуализацией игры)")
 
-    # Кнопка запуска обучения
     if st.button("Начать обучение"):
-        # Создаем двух агентов для игры друг против друга
-        agent1 = QLearningAgent(alpha=alpha, gamma=gamma, epsilon=epsilon, min_epsilon=min_epsilon, epsilon_decay=epsilon_decay)
-        agent2 = QLearningAgent(alpha=alpha, gamma=gamma, epsilon=epsilon, min_epsilon=min_epsilon, epsilon_decay=epsilon_decay)
-        env = ConnectFourEnv()
+        db_gen = get_db()
+        db = next(db_gen)
         
-        # Элементы для отображения прогресса
+        agent_params = {"alpha": alpha, "gamma": gamma, "epsilon": epsilon, "epsilon_decay": epsilon_decay}
+        existing_agent = db.query(Agent).filter_by(**agent_params).first()
+
+        if not existing_agent:
+            new_agent = Agent(**agent_params)
+            db.add(new_agent)
+            db.commit()
+            db.refresh(new_agent)
+            agent_id = new_agent.id
+        else:
+            agent_id = existing_agent.id
+        st.session_state.current_agent_id = agent_id
+
+        training_session = TrainingSession(agent_id=agent_id, total_episodes=episodes)
+        db.add(training_session)
+        db.commit()
+        db.refresh(training_session)
+        
+        agent1 = QLearningAgent(alpha=alpha, gamma=gamma, epsilon=epsilon, min_epsilon=0.01, epsilon_decay=epsilon_decay)
+        agent2 = QLearningAgent(alpha=alpha, gamma=gamma, epsilon=epsilon, min_epsilon=0.01, epsilon_decay=epsilon_decay)
+        env = ConnectFourEnv()
+
         status_text = st.empty()
         if demo_mode:
             if episodes > 1000:
-                st.warning("В режиме демонстрации количество эпизодов ограничено до 1000.")
                 episodes = 1000
             board_placeholder = st.empty()
         else:
             status_text.info("Идет обучение агента, пожалуйста, подождите...")
-
-        wins_agent1 = 0
-        win_rates = []
-        progress_bar = st.progress(0)
-        chart_placeholder = st.empty()
         
-        st.write(f"Начинаем обучение на {episodes} эпизодах...")
-
-        # Основной цикл обучения
+        wins_agent1 = 0
+        win_rates, chart_placeholder = [], st.empty()
+        progress_bar = st.progress(0)
+        
         for episode in range(episodes):
             env.reset()
-            state = env.get_state()
             done = False
-            
             while not done:
-                if demo_mode: # Показываем доску в демо-режиме
+                if demo_mode:
                     draw_board(env.board, target_container=board_placeholder)
                     time.sleep(0.05)
-
-                # Ход первого агента
+                
                 action1 = agent1.choose_action(env)
-                if action1 is None: break 
-                
+                if action1 is None: break
                 old_state1 = env.get_state()
-                next_state, reward1, done, info = env.step(action1)
+                next_state, reward1, done, _ = env.step(action1)
                 
-                if done: # ксли игра закончилась на ходе первого
-                    if reward1 == 10: wins_agent1 += 1; reward2 = -10
-                    elif 'error' in info: reward2 = 10 
-                    else: reward2 = 0
+                if done:
+                    reward2 = -10 if reward1 == 10 else 0
+                    if reward1 == 10: wins_agent1 += 1
                 else:
                     if demo_mode:
                         draw_board(env.board, target_container=board_placeholder)
                         time.sleep(0.05)
-                        
-                    # ход второго агента
+                    
                     action2 = agent2.choose_action(env)
                     if action2 is None: break
-                    
                     old_state2 = env.get_state()
-                    next_state, reward2, done, info = env.step(action2)
-
-                    if done and reward2 == 10: reward1 = -10 # Если второй выиграл
-                    
-                    # обучаем второго агента
+                    next_state, reward2, done, _ = env.step(action2)
+                    if done and reward2 == 10: reward1 = -10
                     agent2.learn(old_state2, action2, reward2, next_state, done)
 
-                # обучаем первого агента
                 agent1.learn(old_state1, action1, reward1, next_state, done)
-                state = next_state
 
-            # Обновляем прогресс и график
             progress_bar.progress((episode + 1) / episodes)
             if (episode + 1) % 100 == 0 or episode == episodes - 1:
                 win_rate = (wins_agent1 / (episode + 1)) * 100
                 win_rates.append({'episode': episode + 1, 'win_rate': win_rate})
+                
+                win_rate_log = WinRateLog(session_id=training_session.id, episode_number=episode + 1, win_rate=win_rate)
+                db.add(win_rate_log)
+                db.commit()
+
                 df_rates = pd.DataFrame(win_rates)
                 fig = px.line(df_rates, x='episode', y='win_rate', title="Процент побед Агента 1 (%)")
-                chart_placeholder.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                chart_placeholder.plotly_chart(fig, use_container_width=True)
 
         st.success("Обучение завершено!")
-        status_text.empty()
-        
-        # Сохраняем результаты в БД и файл
         final_win_rate = (wins_agent1 / episodes) * 100
-        agent1.save(Q_TABLE_FILE)
-        save_training_result(episodes, final_win_rate)
         
+        training_session.end_time = datetime.utcnow()
+        training_session.final_win_rate = final_win_rate
+        db.commit()
+        
+        agent1.save(Q_TABLE_FILE)
         st.write(f"Финальный процент побед Агента 1: {final_win_rate:.2f}%")
-        st.write(f"Q-таблица победившего агента сохранена в `{Q_TABLE_FILE}`.")
+        db.close()
 
-
-#ВКЛАДКА "ИГРА"
+# ВКЛАДКА "ИГРА"
 with tab2:
     st.header("Игра против обученного агента")
+
+    st.markdown("""
+        <style>
+            .game-controls [data-testid="stHorizontalBlock"] {
+                display: flex;
+                justify-content: center;
+                gap: 6px; /* (50px cell + 3px margin * 2) - 50px button = 6px */
+            }
+             .game-controls .stButton>button {
+                width: 50px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
     
-    # Проверяем, есть ли сохраненный агент
     if not os.path.exists(Q_TABLE_FILE):
-        st.warning(f"Файл с обученным агентом `{Q_TABLE_FILE}` не найден. Сначала обучите агента на вкладке 'Обучение'.")
+        st.warning(f"Файл `{Q_TABLE_FILE}` не найден. Сначала обучите агента.")
     else:
-        # Загружаем Q-таблицу агента
         if 'q_table' not in st.session_state.agent.q_table or not st.session_state.agent.q_table:
             st.session_state.agent.load(Q_TABLE_FILE)
-            st.session_state.agent.epsilon = 0 # Отключаем исследование для игры
-            st.success(f"Агент успешно загружен из `{Q_TABLE_FILE}`.")
+            st.session_state.agent.epsilon = 0
+            st.success("Агент успешно загружен.")
 
-        # Показываем сообщение о результате игры
         if st.session_state.game_over:
-            if st.session_state.winner == 1: st.success("Поздравляем, вы победили! 🎉")
-            elif st.session_state.winner == 2: st.error("Агент победил. Попробуйте еще раз! 🤖")
-            else: st.info("Ничья! 🤝")
+            winner_msg = {1: "Поздравляем, вы победили! 🎉", 2: "Агент победил. Попробуйте еще раз! 🤖", 0: "Ничья! 🤝"}
+            st.info(winner_msg.get(st.session_state.winner, ""))
 
-        # Рисуем поле и кнопки для хода
-        valid_moves = st.session_state.env.get_valid_moves()
-        cols = st.columns(st.session_state.env.cols)
+        draw_board(st.session_state.env.board)
+        
         human_action = None
+        with st.container():
+            st.markdown('<div class="game-controls">', unsafe_allow_html=True)
+            action_cols = st.columns(st.session_state.env.cols)
+            valid_moves = st.session_state.env.get_valid_moves()
+            
+            for i in range(st.session_state.env.cols):
+                with action_cols[i]:
+                    is_disabled = (i not in valid_moves) or st.session_state.game_over
+                    if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=False):
+                        human_action = i
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        for i in range(st.session_state.env.cols):
-            with cols[i]:
-                # Ячейки колонки
-                for r in range(st.session_state.env.rows):
-                    player = st.session_state.env.board[r, i]
-                    icon = "⚪️"
-                    if player == 1: icon = "🔴"
-                    elif player == 2: icon = "🔵"
-                    st.markdown(f"<p style='text-align: center; font-size: 28px; height: 40px;'>{icon}</p>", unsafe_allow_html=True)
-                
-                # Кнопка для хода в колонку
-                is_disabled = (i not in valid_moves) or st.session_state.game_over or (st.session_state.env.current_player != 1)
-                if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=True):
-                    human_action = i
-
-        # Логика игры после нажатия кнопки
         if human_action is not None:
-            # Ход человека
+            st.session_state.move_history.append((1, human_action))
             _, _, human_done, _ = st.session_state.env.step(human_action)
+            
             if human_done:
                 st.session_state.game_over = True
                 st.session_state.winner = 1 if st.session_state.env.check_win(1) else 0
-                st.rerun() # Перезапускаем скрипт для обновления UI
             else:
-                # Ход агента
                 action = st.session_state.agent.choose_action(st.session_state.env)
                 if action is not None:
+                    st.session_state.move_history.append((2, action))
                     _, _, agent_done, _ = st.session_state.env.step(action)
                     if agent_done:
                         st.session_state.game_over = True
                         st.session_state.winner = 2 if st.session_state.env.check_win(2) else 0
-                st.rerun()
+            
+            st.rerun()
 
-        # Показываем кнопку "Новая игра" после окончания
         if st.session_state.game_over:
             if st.button("Новая игра", use_container_width=True):
                 reset_game()
                 st.rerun()
 
-#"СТАТИСТИКА"
+# ВКЛАДКА "СТАТИСТИКА"
 with tab3:
-    st.header("История и статистика обучений")
+    st.header("Статистика и история игр")
     
-    # Получаем данные из БД
-    results_df = get_all_results()
+    db_gen = get_db()
+    db = next(db_gen)
     
-    if results_df.empty:
-        st.info("Пока нет данных для отображения. Проведите хотя бы одну сессию обучения.")
+    st.subheader("Реестр уникальных агентов")
+    avg_win_rates = db.query(
+        TrainingSession.agent_id,
+        func.avg(TrainingSession.final_win_rate).label('avg_win_rate'),
+        func.count(TrainingSession.id).label('session_count')
+    ).group_by(TrainingSession.agent_id).subquery()
+    
+    agents_query = db.query(Agent, avg_win_rates.c.avg_win_rate, avg_win_rates.c.session_count).outerjoin(
+        avg_win_rates, Agent.id == avg_win_rates.c.agent_id
+    )
+    agents_data = [{
+        "ID Агента": agent.id, "Alpha": agent.alpha, "Gamma": agent.gamma,
+        "Epsilon": agent.epsilon, "Decay": agent.epsilon_decay,
+        "Средний WinRate (%)": f"{avg_win_rate:.2f}" if avg_win_rate else "N/A",
+        "Кол-во сессий": session_count if session_count else 0
+    } for agent, avg_win_rate, session_count in agents_query.all()]
+
+    if not agents_data:
+        st.info("Нет данных по агентам. Проведите обучение.")
     else:
-        # Показываем таблицу с результатами
-        st.table(results_df)
-        
-        # И график изменения процента побед
-        fig = px.line(results_df, x='timestamp', y='win_rate_agent_1', 
-                      title='Процент побед Агента 1 по сессиям обучения',
-                      labels={'timestamp': 'Дата и время', 'win_rate_agent_1': 'Процент побед (%)'},
-                      markers=True)
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.dataframe(pd.DataFrame(agents_data))
+
+    st.subheader("История сессий обучения")
+    sessions = db.query(TrainingSession).order_by(TrainingSession.start_time.desc()).all()
+    
+    if not sessions:
+        st.info("Пока не было проведено ни одной сессии обучения.")
+    else:
+        sessions_data = [{
+            "ID Сессии": s.id, "ID Агента": s.agent_id,
+            "Время начала": s.start_time.strftime("%Y-%m-%d %H:%M"),
+            "Длительность (сек)": f"{(s.end_time - s.start_time).total_seconds():.2f}" if s.end_time else 0,
+            "Кол-во эпизодов": s.total_episodes,
+            "Финальный WinRate (%)": f"{s.final_win_rate:.2f}" if s.final_win_rate is not None else "N/A",
+        } for s in sessions]
+        sessions_df = pd.DataFrame(sessions_data)
+        st.dataframe(sessions_df)
+
+        session_to_view = st.selectbox("Выберите сессию для просмотра кривой обучения", options=sessions_df["ID Сессии"])
+        if session_to_view:
+            with st.expander(f"Кривая обучения для сессии #{session_to_view}"):
+                logs = db.query(WinRateLog).filter(WinRateLog.session_id == session_to_view).order_by(WinRateLog.episode_number).all()
+                if not logs:
+                    st.warning("Нет данных для построения графика для этой сессии.")
+                else:
+                    log_df = pd.DataFrame([{"Эпизод": log.episode_number, "Win Rate (%)": log.win_rate} for log in logs])
+                    fig = px.line(log_df, x="Эпизод", y="Win Rate (%)", title=f"Кривая обучения для сессии #{session_to_view}")
+                    st.plotly_chart(fig, use_container_width=True)
+    db.close()
