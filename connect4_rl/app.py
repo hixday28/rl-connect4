@@ -343,14 +343,25 @@ with stats_tab:
         sessions_df = pd.DataFrame(sessions_data)
         st.dataframe(sessions_df)
 
-        session_to_view = st.selectbox("Выберите сессию для просмотра кривой обучения", options=sessions_df["ID Сессии"])
-        if session_to_view:
-            with st.expander(f"Кривая обучения для сессии #{session_to_view}"):
-                logs = db.query(WinRateLog).filter(WinRateLog.session_id == session_to_view).order_by(WinRateLog.episode_number).all()
+        if not sessions_df.empty:
+            # Сортируем по времени начала, чтобы последняя сессия была первой в списке
+            sessions_df_sorted = sessions_df.sort_values(by="Время начала", ascending=False)
+            
+            session_to_view_id = st.selectbox(
+                "Выберите ID сессии для просмотра кривой обучения",
+                options=sessions_df_sorted["ID Сессии"],
+                index=0  # Выбираем самую последнюю сессию по умолчанию
+            )
+            
+            if session_to_view_id:
+                st.subheader(f"Кривая обучения для сессии #{session_to_view_id}")
+                logs = db.query(WinRateLog).filter(WinRateLog.session_id == session_to_view_id).order_by(WinRateLog.episode_number).all()
                 if not logs:
-                    st.warning("Нет данных для построения графика для этой сессии.")
+                    st.warning("Нет данных для построения графика для выбранной сессии.")
                 else:
                     log_df = pd.DataFrame([{"Эпизод": log.episode_number, "Win Rate (%)": log.win_rate} for log in logs])
-                    fig = px.line(log_df, x="Эпизод", y="Win Rate (%)", title=f"Кривая обучения для сессии #{session_to_view}")
+                    fig = px.line(log_df, x="Эпизод", y="Win Rate (%)", title=f"Кривая обучения для сессии #{session_to_view_id}")
                     st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Нет данных для построения кривой обучения. Проведите обучение.")
     db.close()
