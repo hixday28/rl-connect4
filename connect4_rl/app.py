@@ -111,12 +111,16 @@ tab1, tab2, tab3 = st.tabs(["Обучение", "Игра", "Статистик�
 # ВКЛАДКА "ОБУЧЕНИЕ"
 with tab1:
     st.header("Обучение агентов")
-    st.sidebar.title("Параметры обучения")
-    episodes = st.sidebar.number_input("Количество игр (эпизодов)", min_value=100, max_value=1000000, value=10000, step=100)
-    alpha = st.sidebar.slider("Скорость обучения (Alpha)", 0.01, 1.0, 0.1, 0.01)
-    gamma = st.sidebar.slider("Дисконт-фактор (Gamma)", 0.8, 0.99, 0.99, 0.01)
-    epsilon = st.sidebar.slider("Начальный Epsilon", 0.1, 1.0, 0.9, 0.05)
-    epsilon_decay = st.sidebar.number_input("Затухание Epsilon", min_value=0.9, max_value=1.0, value=0.9995, step=0.0001, format="%.4f")
+
+    with st.expander("Параметры обучения", expanded=True):
+        cols = st.columns(2)
+        with cols[0]:
+            episodes = st.number_input("Количество игр (эпизодов)", min_value=100, max_value=1000000, value=10000, step=100)
+            alpha = st.slider("Скорость обучения (Alpha)", 0.01, 1.0, 0.1, 0.01)
+            gamma = st.slider("Дисконт-фактор (Gamma)", 0.8, 0.99, 0.99, 0.01)
+        with cols[1]:
+            epsilon = st.slider("Начальный Epsilon", 0.1, 1.0, 0.9, 0.05)
+            epsilon_decay = st.number_input("Затухание Epsilon", min_value=0.9, max_value=1.0, value=0.9995, step=0.0001, format="%.4f")
     
     demo_mode = st.checkbox("Режим демонстрации (с визуализацией игры)")
 
