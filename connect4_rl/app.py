@@ -40,6 +40,9 @@ if 'move_history' not in st.session_state:
     st.session_state.move_history = []
 if 'current_agent_id' not in st.session_state:
     st.session_state.current_agent_id = None
+if 'turn' not in st.session_state:
+    st.session_state.turn = 1
+
 
 # Создаем базу данных при первом запуске, если ее нет
 if not os.path.exists(DB_FILE):
@@ -53,18 +56,11 @@ def get_db():
     finally:
         db.close()
 
-def draw_board(board, target_container=None):
-    if target_container is None:
-        target_container = st.container()
-    target_container.empty()
-    # CSS стили для доски
+def draw_static_board(board, target_container):
+    """Отрисовывает статичное игровое поле в контейнере."""
     styles = """
     <style>
-    .board-row { 
-        display: flex; 
-        flex-direction: row; 
-        justify-content: center; 
-    }
+    .board-row { display: flex; flex-direction: row; justify-content: center; }
     .cell { 
         width: 50px; 
         height: 50px; 
@@ -81,16 +77,14 @@ def draw_board(board, target_container=None):
     html_rows = []
     for r in range(board.shape[0]):
         html_cells = []
-        for c in range(board.shape[1]): # ИСПРАВЛЕНО: Используем board.shape[1]
+        for c in range(board.shape[1]):
             player = board[r, c]
-            if player == 1: cell_class = "player1"
-            elif player == 2: cell_class = "player2"
-            else: cell_class = "empty"
+            cell_class = "player1" if player == 1 else "player2" if player == 2 else "empty"
             html_cells.append(f'<div class="cell {cell_class}"></div>')
         html_rows.append(f'<div class="board-row">{"".join(html_cells)}</div>')
     
-    board_html = "".join(html_rows)
-    target_container.markdown(styles + board_html, unsafe_allow_html=True)
+    board_html = styles + "".join(html_rows)
+    target_container.markdown(board_html, unsafe_allow_html=True)
 
 
 def reset_game():
@@ -98,7 +92,7 @@ def reset_game():
     st.session_state.game_over = False
     st.session_state.winner = None
     st.session_state.move_history = []
-    # Очищаем query params, если они использовались
+    st.session_state.turn = 1
     if hasattr(st, 'query_params') and st.query_params:
         st.query_params.clear()
 
@@ -180,7 +174,7 @@ with training_tab:
             done = False
             while not done:
                 if demo_mode:
-                    draw_board(env.board, target_container=board_placeholder)
+                    draw_static_board(env.board, board_placeholder)
                     time.sleep(0.05)
                 
                 action1 = agent1.choose_action(env)
@@ -193,7 +187,7 @@ with training_tab:
                     if reward1 == 10: wins_agent1 += 1
                 else:
                     if demo_mode:
-                        draw_board(env.board, target_container=board_placeholder)
+                        draw_static_board(env.board, board_placeholder)
                         time.sleep(0.05)
                     
                     action2 = agent2.choose_action(env)
@@ -233,68 +227,60 @@ with training_tab:
 with game_tab:
     st.header("Игра против обученного агента")
 
-    st.markdown("""
-        <style>
-            /* Стили для кнопок выбора столбца */
-            .game-controls-container {
-                display: flex;
-                justify-content: center; /* Центрируем контейнер с колонками */
-                margin-top: 10px; /* Отступ сверху от доски */
-            }
-            .game-controls [data-testid="stColumn"] {
-                flex: 0 0 56px !important; /* Фиксированная ширина колонки: 50px (кнопка) + 3px*2 (margin) */
-                padding: 0px !important; /* Убираем внутренний отступ колонок */
-                display: flex;
-                justify-content: center;
-                align-items: center;
-            }
-            .game-controls .stButton>button {
-                width: 50px; /* Ширина самой кнопки */
-                height: 35px; /* Высота кнопки */
-                margin: 0px; /* Убираем маргин с самой кнопки, так как его задает колонка */
-                padding: 0px; /* Убираем внутренний отступ кнопки */
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    
     if not os.path.exists(Q_TABLE_FILE):
         st.warning(f"Файл `{Q_TABLE_FILE}` не найден. Сначала обучите агента.")
     else:
+        # Загрузка агента, если он еще не в сессии
         if 'q_table' not in st.session_state.agent.q_table or not st.session_state.agent.q_table:
             st.session_state.agent.load(Q_TABLE_FILE)
-            st.session_state.agent.epsilon = 0
+            st.session_state.agent.epsilon = 0  # Отключаем случайные ходы для игры
             st.success("Агент успешно загружен.")
 
+        # Сообщение о победителе или ничьей
         if st.session_state.game_over:
-            winner_msg = {1: "Поздравляем, вы победили! 🎉", 2: "Агент победил. Попробуйте еще раз! 🤖", 0: "Ничья! 🤝"}
-            st.info(winner_msg.get(st.session_state.winner, ""))
-
-        draw_board(st.session_state.env.board)
+            winner_map = {1: "Поздравляем, вы победили! 🎉", 2: "Агент победил. Попробуйте еще раз! 🤖", 0: "Ничья! 🤝"}
+            st.info(winner_map.get(st.session_state.winner, ""))
+        else:
+            # Индикатор хода
+            if st.session_state.turn == 1:
+                st.info("Ваш ход (🔴)")
+            else:
+                st.warning("Агент думает (🔵)...")
         
         human_action = None
-        # Контейнер для центрирования кнопок
-        st.markdown('<div class="game-controls-container">', unsafe_allow_html=True)
-        st.markdown('<div class="game-controls">', unsafe_allow_html=True) 
-        action_cols = st.columns(st.session_state.env.cols)
+        board_cols = st.columns(st.session_state.env.cols)
         valid_moves = st.session_state.env.get_valid_moves()
         
         for i in range(st.session_state.env.cols):
-            with action_cols[i]:
+            with board_cols[i]:
+                # Отрисовка ячеек столбца
+                for r in range(st.session_state.env.rows):
+                    player = st.session_state.env.board[r, i]
+                    if player == 1:
+                        emoji = "🔴"
+                    elif player == 2:
+                        emoji = "🔵"
+                    else:
+                        emoji = "⚪️"
+                    st.markdown(f"<h1 style='text-align: center;'>{emoji}</h1>", unsafe_allow_html=True)
+                
+                # Кнопка для хода
                 is_disabled = (i not in valid_moves) or st.session_state.game_over
-                if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=True): # Используем use_container_width=True
+                if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=True):
                     human_action = i
-        st.markdown('</div>', unsafe_allow_html=True) 
-        st.markdown('</div>', unsafe_allow_html=True) 
 
-
+        # Логика обработки ходов
         if human_action is not None:
+            # Ход человека
             st.session_state.move_history.append((1, human_action))
             _, _, human_done, _ = st.session_state.env.step(human_action)
+            st.session_state.turn = 2 # Переключаем ход на агента
             
             if human_done:
                 st.session_state.game_over = True
                 st.session_state.winner = 1 if st.session_state.env.check_win(1) else 0
             else:
+                # Ход агента
                 action = st.session_state.agent.choose_action(st.session_state.env)
                 if action is not None:
                     st.session_state.move_history.append((2, action))
@@ -302,6 +288,7 @@ with game_tab:
                     if agent_done:
                         st.session_state.game_over = True
                         st.session_state.winner = 2 if st.session_state.env.check_win(2) else 0
+                st.session_state.turn = 1 # Возвращаем ход человеку
             
             st.rerun()
 
@@ -309,6 +296,7 @@ with game_tab:
             if st.button("Новая игра", use_container_width=True):
                 reset_game()
                 st.rerun()
+
 
 # ВКЛАДКА "СТАТИСТИКА"
 with stats_tab:
