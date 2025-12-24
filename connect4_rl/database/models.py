@@ -19,7 +19,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Базовый класс для всех моделей
 Base = declarative_base()
 
-# 1. Модель Agent (Агенты)
+# 1 Модель Agent (Агенты)
 class Agent(Base):
     __tablename__ = "agents"
     id = Column(Integer, primary_key=True, index=True)
@@ -31,7 +31,7 @@ class Agent(Base):
 
     training_sessions = relationship("TrainingSession", back_populates="agent")
 
-# 2. Модель TrainingSession (Сессии обучения)
+# 2 Модель TrainingSession (Сессии обучения)
 class TrainingSession(Base):
     __tablename__ = "training_sessions"
     id = Column(Integer, primary_key=True, index=True)
@@ -44,7 +44,7 @@ class TrainingSession(Base):
     agent = relationship("Agent", back_populates="training_sessions")
     win_rate_logs = relationship("WinRateLog", back_populates="session", cascade="all, delete-orphan")
 
-# 3. Модель WinRateLog (Лог процента побед)
+# 3 Модель WinRateLog (Лог процента побед)
 class WinRateLog(Base):
     __tablename__ = "win_rate_logs"
     id = Column(Integer, primary_key=True, index=True)
@@ -57,11 +57,11 @@ class WinRateLog(Base):
 
 # Функции для работы с БД
 def init_db():
-    """Создает все таблицы, которые наследуются от Base."""
+    #Создает все таблицы, которые наследуются от Base
     Base.metadata.create_all(bind=engine)
 
 def get_db():
-    """Возвращает сессию базы данных."""
+    #Возвращает сессию базы данных
     db = SessionLocal()
     try:
         yield db

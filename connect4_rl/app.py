@@ -57,7 +57,7 @@ def get_db():
         db.close()
 
 def draw_static_board(board, target_container):
-    """Отрисовывает статичное игровое поле в контейнере."""
+    
     styles = """
     <style>
     .board-row { display: flex; flex-direction: row; justify-content: center; }
@@ -266,7 +266,7 @@ with game_tab:
                 
                 # Кнопка для хода
                 is_disabled = (i not in valid_moves) or st.session_state.game_over
-                if st.button("⬇️", key=f"btn_{i}", disabled=is_disabled, use_container_width=True):
+                if st.button("⬇", key=f"btn_{i}", disabled=is_disabled, use_container_width=True):
                     human_action = i
 
         # Логика обработки ходов
